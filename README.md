@@ -1,6 +1,10 @@
 # Sum up 24 November's world news in one image
 
-Entry for make.fun bounty `news-image-20261124`.
+[![make.fun](https://make.fun/badge/news-image-20261124.svg)](https://make.fun/bounty/news-image-20261124)
+[![rank](https://make.fun/badge/news-image-20261124/Thufaili28/news-image-20261124/rank.svg)](https://make.fun/bounty/news-image-20261124)
+[![reward](https://make.fun/badge/news-image-20261124/Thufaili28/news-image-20261124/reward.svg)](https://make.fun/bounty/news-image-20261124)
+
+Entry for make.fun bounty [news-image-20261124](https://make.fun/bounty/news-image-20261124).
 
 Run:
 
