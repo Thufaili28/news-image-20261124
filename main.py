@@ -1,172 +1,234 @@
-#!/usr/bin/env python3
 """Sum up 24 November 2026 world news in one image.
 
-Standard library only (no Pillow, no network). Writes a deterministic
-1024x1024 PNG to /output/entry.png, falling back to output/entry.png.
-Text is drawn with an embedded 5x7 bitmap font, scaled up.
+Writes a deterministic 1024x1024 PNG to /output/entry.png using only the
+Python standard library: a hand-built 5x7 bitmap font, a card layout and a
+minimal PNG encoder on top of zlib.
 """
-import binascii
+
 import os
 import struct
 import zlib
 
-W, H = 1024, 1024
+W = H = 1024
 BG = (255, 255, 255)
-CARD = (242, 244, 247)
-ACCENT = (0, 90, 180)
-TEXT = (17, 24, 39)
-MUTED = (75, 85, 99)
-GOLD = (251, 191, 36)
+INK = (17, 22, 33)
+HEADER = (14, 22, 40)
+HEADER_TEXT = (255, 255, 255)
+RULE = (205, 211, 222)
+BODY = (70, 80, 97)
+TAG = (176, 26, 36)
+TAG_TEXT = (255, 255, 255)
+HEADER_H = 162
 
-# 5x7 bitmap font, '#' = pixel on
-FONT = {
-    'A': ["01110","10001","10001","11111","10001","10001","10001"],
-    'B': ["11110","10001","10001","11110","10001","10001","11110"],
-    'C': ["01110","10001","10000","10000","10000","10001","01110"],
-    'D': ["11110","10001","10001","10001","10001","10001","11110"],
-    'E': ["11111","10000","10000","11110","10000","10000","11111"],
-    'F': ["11111","10000","10000","11110","10000","10000","10000"],
-    'G': ["01110","10001","10000","10111","10001","10001","01111"],
-    'H': ["10001","10001","10001","11111","10001","10001","10001"],
-    'I': ["01110","00100","00100","00100","00100","00100","01110"],
-    'J': ["00111","00010","00010","00010","00010","10010","01100"],
-    'K': ["10001","10010","10100","11000","10100","10010","10001"],
-    'L': ["10000","10000","10000","10000","10000","10000","11111"],
-    'M': ["10001","11011","10101","10101","10001","10001","10001"],
-    'N': ["10001","11001","10101","10011","10001","10001","10001"],
-    'O': ["01110","10001","10001","10001","10001","10001","01110"],
-    'P': ["11110","10001","10001","11110","10000","10000","10000"],
-    'Q': ["01110","10001","10001","10001","10101","10010","01101"],
-    'R': ["11110","10001","10001","11110","10100","10010","10001"],
-    'S': ["01111","10000","10000","01110","00001","00001","11110"],
-    'T': ["11111","00100","00100","00100","00100","00100","00100"],
-    'U': ["10001","10001","10001","10001","10001","10001","01110"],
-    'V': ["10001","10001","10001","10001","10001","01010","00100"],
-    'W': ["10001","10001","10001","10101","10101","11011","10001"],
-    'X': ["10001","10001","01010","00100","01010","10001","10001"],
-    'Y': ["10001","10001","01010","00100","00100","00100","00100"],
-    'Z': ["11111","00001","00010","00100","01000","10000","11111"],
-    '0': ["01110","10001","10011","10101","11001","10001","01110"],
-    '1': ["00100","01100","00100","00100","00100","00100","01110"],
-    '2': ["01110","10001","00001","00110","01000","10000","11111"],
-    '3': ["11111","00010","00100","00010","00001","10001","01110"],
-    '4': ["00010","00110","01010","10010","11111","00010","00010"],
-    '5': ["11111","10000","11110","00001","00001","10001","01110"],
-    '6': ["00110","01000","10000","11110","10001","10001","01110"],
-    '7': ["11111","00001","00010","00100","01000","01000","01000"],
-    '8': ["01110","10001","10001","01110","10001","10001","01110"],
-    '9': ["01110","10001","10001","01111","00001","00010","01100"],
-    ' ': ["00000","00000","00000","00000","00000","00000","00000"],
-    '.': ["00000","00000","00000","00000","00000","01100","01100"],
-    ',': ["00000","00000","00000","00000","01100","00100","01000"],
-    '-': ["00000","00000","00000","01110","00000","00000","00000"],
-    ':': ["00000","01100","01100","00000","01100","01100","00000"],
-    '%': ["11001","11010","00010","00100","01000","01011","10011"],
-    '/': ["00001","00010","00010","00100","01000","01000","10000"],
-    "'": ["00100","00100","01000","00000","00000","00000","00000"],
-    '(': ["00010","00100","01000","01000","01000","00100","00010"],
-    ')': ["01000","00100","00010","00010","00010","00100","01000"],
-    '*': ["00000","10101","01110","11111","01110","10101","00000"],
+GLYPHS = {
+    "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
+    "C": ("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
+    "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    "E": ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+    "F": ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    "G": ("01110", "10001", "10000", "10111", "10001", "10001", "01111"),
+    "H": ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "I": ("11111", "00100", "00100", "00100", "00100", "00100", "11111"),
+    "J": ("00111", "00010", "00010", "00010", "00010", "10010", "01100"),
+    "K": ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
+    "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    "M": ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
+    "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
+    "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    "Q": ("01110", "10001", "10001", "10001", "10101", "10010", "01101"),
+    "R": ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+    "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    "U": ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "V": ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
+    "W": ("10001", "10001", "10001", "10101", "10101", "11011", "10001"),
+    "X": ("10001", "10001", "01010", "00100", "01010", "10001", "10001"),
+    "Y": ("10001", "10001", "01010", "00100", "00100", "00100", "00100"),
+    "Z": ("11111", "00001", "00010", "00100", "01000", "10000", "11111"),
+    "0": ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
+    "1": ("00100", "01100", "00100", "00100", "00100", "00100", "01110"),
+    "2": ("01110", "10001", "00001", "00110", "01000", "10000", "11111"),
+    "3": ("11111", "00010", "00100", "00010", "00001", "10001", "01110"),
+    "4": ("00010", "00110", "01010", "10010", "11111", "00010", "00010"),
+    "5": ("11111", "10000", "11110", "00001", "00001", "10001", "01110"),
+    "6": ("00110", "01000", "10000", "11110", "10001", "10001", "01110"),
+    "7": ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
+    "8": ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
+    "9": ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
+    " ": ("00000", "00000", "00000", "00000", "00000", "00000", "00000"),
+    ".": ("00000", "00000", "00000", "00000", "00000", "01100", "01100"),
+    ",": ("00000", "00000", "00000", "00000", "01100", "01100", "01000"),
+    "-": ("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
+    "'": ("01100", "01100", "01000", "00000", "00000", "00000", "00000"),
+    ":": ("00000", "01100", "01100", "00000", "01100", "01100", "00000"),
+    "%": ("11001", "11010", "00010", "00100", "01000", "01011", "10011"),
+    "/": ("00001", "00010", "00010", "00100", "01000", "01000", "10000"),
 }
 
-HEADLINES = [
-    ("1  NVIDIA", "HUANG BACK AS CEO",
-     "NVIDIA REINSTATED JENSEN HUANG AS CEO. SHARES ROSE 31% IN A DAY."),
-    ("2  UKRAINE", "WARSHIP SUNK OFF LIBYA",
-     "UKRAINE SANK THE RUSSIAN CORVETTE MERKURY OFF LIBYA WITH DRONES."),
-    ("3  HORMUZ", "THREE TANKERS HIT MINES",
-     "IRAN SAID THREE TANKERS HIT MINES IN THE STRAIT OF HORMUZ."),
-    ("4  GAZA", "STRIKES KILL SECURITY CHIEF",
-     "ISRAELI STRIKES KILLED A HAMAS SECURITY CHIEF AND SIX OTHERS."),
-    ("5  ZAPORIZHZHIA", "ATTACK KILLS TWO",
-     "A RUSSIAN ATTACK KILLED TWO IN ZAPORIZHZHIA AND WOUNDED 40."),
-    ("6  INDONESIA", "FACTORY FIRE KILLS 26",
-     "A FACTORY FIRE IN BANTEN, INDONESIA KILLED 26 PEOPLE."),
-]
+GLYPH_W = 5
+GLYPH_H = 7
+SPACING = 1
 
-def chunk(typ, data):
-    c = struct.pack(">I", len(data)) + typ + data
-    return c + struct.pack(">I", binascii.crc32(typ + data) & 0xffffffff)
-
-def save_png(path, buf):
-    raw = b"".join(b"\x00" + bytes(buf[y*W*3:(y+1)*W*3]) for y in range(H))
-    png = b"\x89PNG\r\n\x1a\n"
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
-    png += chunk(b"IDAT", zlib.compress(raw, 9))
-    png += chunk(b"IEND", b"")
-    with open(path, "wb") as f:
-        f.write(png)
-    return len(png)
 
 class Canvas:
-    def __init__(self):
-        self.buf = bytearray(BG * W * H)
+    def __init__(self, width, height, color):
+        self.width = width
+        self.height = height
+        self.pixels = bytearray(bytes(color) * (width * height))
+
     def rect(self, x, y, w, h, color):
-        for yy in range(max(0, y), min(H, y + h)):
-            base = (yy * W + max(0, x)) * 3
-            for xx in range(max(0, x), min(W, x + w)):
-                i = (yy * W + xx) * 3
-                self.buf[i:i+3] = bytes(color)
-    def text(self, x, y, s, scale, color):
+        x0, y0 = max(0, x), max(0, y)
+        x1, y1 = min(self.width, x + w), min(self.height, y + h)
+        if x1 <= x0 or y1 <= y0:
+            return
+        row = bytes(color) * (x1 - x0)
+        for yy in range(y0, y1):
+            start = (yy * self.width + x0) * 3
+            self.pixels[start:start + len(row)] = row
+
+    def text(self, x, y, s, color, scale, bold=False, tracking=0):
         cx = x
         for ch in s.upper():
-            glyph = FONT.get(ch, FONT[' '])
+            glyph = GLYPHS.get(ch, GLYPHS[" "])
             for gy, row in enumerate(glyph):
                 for gx, bit in enumerate(row):
-                    if bit == '1':
-                        self.rect(cx + gx*scale, y + gy*scale, scale, scale, color)
-            cx += 6 * scale
+                    if bit == "1":
+                        self.rect(cx + gx * scale, y + gy * scale, scale, scale, color)
+                        if bold:
+                            self.rect(cx + gx * scale + 1, y + gy * scale, scale, scale, color)
+            cx += (GLYPH_W + SPACING) * scale + tracking
         return cx
-    def text_w(self, s, scale):
-        return len(s) * 6 * scale
-    def wrap(self, s, scale, max_w):
-        words = s.split()
-        lines, cur = [], ""
-        for w in words:
-            t = (cur + " " + w).strip()
-            if self.text_w(t, scale) <= max_w:
-                cur = t
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        return lines
+
+
+def text_width(s, scale, tracking=0):
+    return len(s) * ((GLYPH_W + SPACING) * scale + tracking)
+
+
+def wrap(s, scale, max_width, tracking=0):
+    lines = []
+    line = ""
+    for word in s.split():
+        candidate = word if not line else line + " " + word
+        if text_width(candidate, scale, tracking) <= max_width:
+            line = candidate
+        else:
+            if line:
+                lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
+
+
+def write_png(path, canvas):
+    raw = bytearray()
+    stride = canvas.width * 3
+    for y in range(canvas.height):
+        raw.append(0)
+        raw += canvas.pixels[y * stride:(y + 1) * stride]
+
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", canvas.width, canvas.height, 8, 2, 0, 0, 0)
+    out = b"\x89PNG\r\n\x1a\n"
+    out += chunk(b"IHDR", header)
+    out += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    out += chunk(b"IEND", b"")
+    with open(path, "wb") as fh:
+        fh.write(out)
+
+
+STORIES = (
+    ("NVIDIA", "HUANG BACK AS CEO",
+     "HUANG REINSTATED. SHARES ROSE 31% IN A DAY."),
+    ("UKRAINE", "WARSHIP SUNK OFF LIBYA",
+     "DRONES SANK RUSSIAN CORVETTE MERKURY."),
+    ("HORMUZ", "THREE TANKERS HIT MINES",
+     "REPORTED BY IRAN IN THE STRAIT OF HORMUZ."),
+    ("GAZA", "STRIKES KILL SECURITY CHIEF",
+     "ISRAELI STRIKES KILLED A HAMAS CHIEF AND 6 MORE."),
+    ("ZAPORIZHZHIA", "ATTACK KILLS TWO",
+     "A RUSSIAN ATTACK KILLED TWO AND WOUNDED 40."),
+    ("INDONESIA", "FACTORY FIRE KILLS 26",
+     "A FACTORY FIRE IN BANTEN KILLED 26 PEOPLE."),
+)
+
+
+def draw_card(canvas, x, y, w, h, number, place, title, body):
+    canvas.rect(x, y, w, h, RULE)
+    canvas.rect(x + 2, y + 2, w - 4, h - 4, BG)
+    canvas.rect(x + 2, y + 2, w - 4, 6, HEADER)
+
+    pad = 18
+    tag = "%d  %s" % (number, place)
+    tag_w = text_width(tag, 3) + 2 * 10
+    canvas.rect(x + pad, y + 24, tag_w, 30, TAG)
+    canvas.text(x + pad + 10, y + 24 + 6, tag, TAG_TEXT, 3)
+
+    ty = y + 68
+    for line in wrap(title, 4, w - 2 * pad):
+        canvas.text(x + pad, ty, line, INK, 4, bold=True)
+        ty += 36
+
+    ty += 8
+    canvas.rect(x + pad, ty, w - 2 * pad, 2, RULE)
+    ty += 16
+
+    lines = wrap(body, 3, w - 2 * pad)
+    assert len(lines) <= 2, body
+    for line in lines:
+        canvas.text(x + pad, ty, line, BODY, 3)
+        ty += 28
+
+
+def build():
+    canvas = Canvas(W, H, BG)
+
+    canvas.rect(0, 0, W, HEADER_H, HEADER)
+    canvas.text(40, 30, "WORLD NEWS", HEADER_TEXT, 9, bold=True)
+    canvas.rect(40, 106, 944, 3, (120, 134, 160))
+    canvas.text(40, 122, "24 NOVEMBER 2026", HEADER_TEXT, 4, bold=True)
+    stamp = "SIX STORIES"
+    canvas.text(984 - text_width(stamp, 3), 126, stamp, (168, 180, 202), 3)
+
+    margin = 30
+    gap = 20
+    card_w = (W - 2 * margin - gap) // 2
+    top = HEADER_H + 24
+    card_h = (H - top - margin - 2 * gap) // 3
+
+    for i, (place, title, body) in enumerate(STORIES):
+        col, row = i % 2, i // 2
+        x = margin + col * (card_w + gap)
+        y = top + row * (card_h + gap)
+        draw_card(canvas, x, y, card_w, card_h, i + 1, place, title, body)
+
+    return canvas
+
+
+def output_path():
+    target = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
+    try:
+        os.makedirs(target, exist_ok=True)
+        probe = os.path.join(target, ".write-test")
+        with open(probe, "wb"):
+            pass
+        os.remove(probe)
+    except OSError:
+        target = "output"
+        os.makedirs(target, exist_ok=True)
+    return os.path.join(target, "entry.png")
+
 
 def main():
-    c = Canvas()
-    c.rect(0, 0, W, 110, (17, 24, 39))
-    c.rect(0, 110, W, 4, ACCENT)
-    c.text(40, 20, "WORLD NEWS", 7, (255, 255, 255))
-    c.text(40, 78, "24 NOVEMBER 2026", 3, ACCENT)
-    c.rect(830, 24, 154, 56, GOLD)
-    c.text(848, 38, "24 NOV", 3, (0, 0, 0))
-    y = 124
-    for kicker, title, body in HEADLINES:
-        c.rect(32, y, 960, 132, CARD)
-        c.rect(32, y, 8, 132, ACCENT)
-        c.text(62, y + 12, kicker, 2, ACCENT)
-        c.text(62, y + 36, title, 4, TEXT)
-        lines = c.wrap(body, 3, 880)
-        ly = y + 82
-        for line in lines[:2]:
-            c.text(62, ly, line, 3, MUTED)
-            ly += 26
-        y += 142
-    c.text(40, 988, "SOURCES: ONE TURN, JUST SECURITY, REUTERS * 24 NOV 2026", 2, MUTED)
-    written = []
-    here = os.path.dirname(os.path.abspath(__file__))
-    for p in ("/output/entry.png", os.path.join(here, "output", "entry.png")):
-        try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            n = save_png(p, c.buf)
-            written.append(p)
-            print(f"wrote {p} {n} bytes")
-        except Exception as e:
-            print(f"skip {p}: {e}")
-    if not written:
-        raise SystemExit("could not write any output")
+    path = output_path()
+    write_png(path, build())
+    print(path, os.path.getsize(path), "bytes")
+
 
 if __name__ == "__main__":
     main()
